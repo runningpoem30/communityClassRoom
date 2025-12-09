@@ -16,3 +16,8 @@ app.get('/', (req, res) => {
 app.listen(port, () => {
   console.log(`Example app listening on port ${port}`)
 })
+
+
+/// u still have auxillary sevices running on your machine 
+/// running a sinlge command , you can bring all the services on your machine 
+/// clean out ur machine !! 
