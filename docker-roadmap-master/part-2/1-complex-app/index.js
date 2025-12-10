@@ -11,7 +11,7 @@ const EntrySchema = new mongoose.Schema({
   text: String,
   date: { type: Date, default: Date.now },
 });
-
+// getting the db to talk to the backend application 
 const Entry = mongoose.model('Entry', EntrySchema);
 
 app.get('/', async (req, res) => {
