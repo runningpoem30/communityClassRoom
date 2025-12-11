@@ -28,3 +28,6 @@ app.listen(port, () => {
   console.log(`Example app listening on port ${port}`);
 });
 
+
+
+// how can backend talk to te
