@@ -1,0 +1,74 @@
+id: automaintainer-demo
+namespace: automaintainer
+description: AutoMaintainer AI - Demo Workflow
+
+inputs:
+  - id: repo_url
+    type: STRING
+    defaults: "https://github.com/runningpoem30/serverless-graphql"
+    
+  - id: task_description
+    type: STRING
+    defaults: "Update read.md with better documentation"
+
+tasks:
+  # Step 1: Log start
+  - id: start
+    type: io.kestra.plugin.core.log.Log
+    message: "🚀 Starting AutoMaintainer AI for repo: {{ inputs.repo_url }}"
+
+  # Step 2: Simulate repo analysis
+  - id: analyze
+    type: io.kestra.plugin.core.log.Log
+    message: |
+      📊 Analyzing repository...
+      - Found open issues
+      - Scanning for TODOs
+      - Checking code quality
+
+  # Step 3: Simulate task selection  
+  - id: select_task
+    type: io.kestra.plugin.core.log.Log
+    message: |
+      🎯 Selected Task: {{ inputs.task_description }}
+      - Task Type: documentation
+      - Priority: medium
+      - Estimated complexity: low
+
+  # Step 4: Simulate implementation
+  - id: implement
+    type: io.kestra.plugin.core.log.Log
+    message: |
+      💻 Implementing changes...
+      - Reading current README.md
+      - Generating improved documentation
+      - Adding installation instructions
+      - Adding usage examples
+
+  # Step 5: Simulate PR creation
+  - id: create_pr
+    type: io.kestra.plugin.core.log.Log
+    message: |
+      📤 Creating Pull Request...
+      - Branch: automaintainer/update-readme
+      - Title: Improve README documentation
+      - Status: Ready for review
+
+  # Step 6: Simulate evaluation
+  - id: evaluate
+    type: io.kestra.plugin.core.log.Log
+    message: |
+      📈 Evaluation Results:
+      - Code Quality: 85/100
+      - Documentation: 90/100
+      - Test Coverage: N/A
+      - Evolution Score: 87/100
+
+  # Step 7: Complete
+  - id: complete
+    type: io.kestra.plugin.core.log.Log
+    message: |
+      ✅ AutoMaintainer AI cycle complete!
+      - Task: {{ inputs.task_description }}
+      - Evolution Score: 87
+      - Status: SUCCESS

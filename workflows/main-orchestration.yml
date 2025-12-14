@@ -1,0 +1,265 @@
+id: main-orchestration
+namespace: automaintainer
+description: AutoMaintainer AI - Complete Autonomous Improvement Lifecycle
+
+variables:
+  repo_url: "https://github.com/{{env.GITHUB_REPO_OWNER}}/{{env.GITHUB_TARGET_REPO}}.git"
+  work_dir: "/tmp/automaintainer/{{trigger.date}}"
+  agent_timeout: "{{env.AGENT_TIMEOUT_SECONDS}}"
+
+inputs:
+  - id: manual_trigger
+    type: BOOLEAN
+    defaults: false
+    description: Set to true for manual execution
+
+triggers:
+  - id: scheduled
+    type: io.kestra.plugin.core.trigger.Schedule
+    cron: "0 2 * * *"  # Daily at 2 AM
+  
+  - id: manual
+    type: io.kestra.plugin.core.trigger.Flow
+    conditions:
+      - type: io.kestra.plugin.core.condition.ExpressionCondition
+        expression: "{{inputs.manual_trigger == true}}"
+
+tasks:
+  # ===========================================
+  # PHASE 1: SETUP & CLONE
+  # ===========================================
+  
+  - id: setup_workspace
+    type: io.kestra.plugin.scripts.shell.Commands
+    description: Create clean working directory
+    commands:
+      - mkdir -p {{render(vars.work_dir)}}
+      - echo "Workspace created at {{render(vars.work_dir)}}"
+
+  - id: clone_repository
+    type: io.kestra.plugin.git.Clone
+    description: Clone target repository
+    url: "{{render(vars.repo_url)}}"
+    branch: main
+    directory: "{{render(vars.work_dir)}}/repo"
+
+  # ===========================================
+  # PHASE 2: CONTEXT GATHERING
+  # ===========================================
+  
+  - id: analyze_repository
+    type: io.kestra.plugin.scripts.python.Commands
+    description: Analyze repo structure, issues, and TODOs
+    runner: DOCKER
+    docker:
+      image: python:3.11-slim
+    beforeCommands:
+      - pip install pygithub gitpython
+    commands:
+      - python /app/agent/analyze_repo.py {{render(vars.work_dir)}}/repo
+    outputFiles:
+      - "analysis.json"
+
+  - id: fetch_github_issues
+    type: io.kestra.plugin.scripts.python.Commands
+    description: Fetch open GitHub issues
+    runner: DOCKER
+    docker:
+      image: python:3.11-slim
+    beforeCommands:
+      - pip install pygithub
+    env:
+      GITHUB_TOKEN: "{{env.GITHUB_TOKEN}}"
+      REPO_OWNER: "{{env.GITHUB_REPO_OWNER}}"
+      REPO_NAME: "{{env.GITHUB_TARGET_REPO}}"
+    commands:
+      - python /app/agent/fetch_issues.py
+    outputFiles:
+      - "issues.json"
+
+  - id: retrieve_past_learnings
+    type: io.kestra.plugin.scripts.python.Commands
+    description: Get relevant learnings from past PRs
+    runner: DOCKER
+    docker:
+      image: python:3.11-slim
+    beforeCommands:
+      - pip install psycopg2-binary
+    env:
+      DATABASE_URL: "{{env.DATABASE_URL}}"
+    commands:
+      - python /app/memory/retrieve_learnings.py
+    outputFiles:
+      - "learnings.json"
+
+  # ===========================================
+  # PHASE 3: TASK SELECTION
+  # ===========================================
+  
+  - id: select_task
+    type: io.kestra.plugin.scripts.python.Commands
+    description: Agent selects ONE improvement task
+    runner: DOCKER
+    docker:
+      image: python:3.11-slim
+    beforeCommands:
+      - pip install anthropic openai
+    env:
+      ANTHROPIC_API_KEY: "{{env.ANTHROPIC_API_KEY}}"
+      CLINE_MODEL: "{{env.CLINE_MODEL}}"
+    commands:
+      - python /app/agent/select_task.py --analysis {{outputs.analyze_repository.outputFiles['analysis.json']}} --issues {{outputs.fetch_github_issues.outputFiles['issues.json']}} --learnings {{outputs.retrieve_past_learnings.outputFiles['learnings.json']}}
+    outputFiles:
+      - "selected_task.json"
+
+  # ===========================================
+  # PHASE 4: IMPLEMENTATION
+  # ===========================================
+  
+  - id: implement_change
+    type: io.kestra.plugin.scripts.python.Commands
+    description: Agent implements the selected task
+    runner: DOCKER
+    docker:
+      image: python:3.11-slim
+    beforeCommands:
+      - pip install anthropic openai gitpython
+    env:
+      ANTHROPIC_API_KEY: "{{env.ANTHROPIC_API_KEY}}"
+      CLINE_MODEL: "{{env.CLINE_MODEL}}"
+    timeout: PT30M
+    commands:
+      - python /app/agent/implement.py --repo {{render(vars.work_dir)}}/repo --task {{outputs.select_task.outputFiles['selected_task.json']}} --learnings {{outputs.retrieve_past_learnings.outputFiles['learnings.json']}}
+    outputFiles:
+      - "implementation_result.json"
+
+  # ===========================================
+  # PHASE 5: PR CREATION
+  # ===========================================
+  
+  - id: create_pull_request
+    type: io.kestra.plugin.scripts.python.Commands
+    description: Create GitHub pull request
+    runner: DOCKER
+    docker:
+      image: python:3.11-slim
+    beforeCommands:
+      - pip install pygithub gitpython
+    env:
+      GITHUB_TOKEN: "{{env.GITHUB_TOKEN}}"
+      REPO_OWNER: "{{env.GITHUB_REPO_OWNER}}"
+      REPO_NAME: "{{env.GITHUB_TARGET_REPO}}"
+    commands:
+      - python /app/agent/create_pr.py --repo {{render(vars.work_dir)}}/repo --implementation {{outputs.implement_change.outputFiles['implementation_result.json']}}
+    outputFiles:
+      - "pr_data.json"
+
+  # ===========================================
+  # PHASE 6: CODE REVIEW (CodeRabbit)
+  # ===========================================
+  
+  - id: wait_for_coderabbit
+    type: io.kestra.plugin.core.flow.Pause
+    description: Wait for CodeRabbit to review
+    timeout: PT10M
+    onResume:
+      - type: io.kestra.plugin.core.log.Log
+        message: "CodeRabbit review timeout - continuing anyway"
+
+  - id: fetch_code_review
+    type: io.kestra.plugin.scripts.python.Commands
+    description: Fetch CodeRabbit review results
+    runner: DOCKER
+    docker:
+      image: python:3.11-slim
+    beforeCommands:
+      - pip install requests pygithub
+    env:
+      GITHUB_TOKEN: "{{env.GITHUB_TOKEN}}"
+      CODERABBIT_API_KEY: "{{env.CODERABBIT_API_KEY}}"
+    commands:
+      - python /app/evaluation/fetch_coderabbit_review.py --pr-data {{outputs.create_pull_request.outputFiles['pr_data.json']}}
+    outputFiles:
+      - "code_review.json"
+
+  # ===========================================
+  # PHASE 7: EVALUATION (Oumi)
+  # ===========================================
+  
+  - id: evaluate_pr
+    type: io.kestra.plugin.scripts.python.Commands
+    description: Evaluate PR quality with Oumi
+    runner: DOCKER
+    docker:
+      image: python:3.11-slim
+    beforeCommands:
+      - pip install openai radon
+    env:
+      OUMI_API_KEY: "{{env.OUMI_API_KEY}}"
+      OUMI_MODEL: "{{env.OUMI_MODEL}}"
+    commands:
+      - python /app/evaluation/oumi_evaluator.py --pr-data {{outputs.create_pull_request.outputFiles['pr_data.json']}} --review {{outputs.fetch_code_review.outputFiles['code_review.json']}}
+    outputFiles:
+      - "evaluation.json"
+
+  # ===========================================
+  # PHASE 8: PERSIST RESULTS
+  # ===========================================
+  
+  - id: store_results
+    type: io.kestra.plugin.scripts.python.Commands
+    description: Store all results in PostgreSQL
+    runner: DOCKER
+    docker:
+      image: python:3.11-slim
+    beforeCommands:
+      - pip install psycopg2-binary
+    env:
+      DATABASE_URL: "{{env.DATABASE_URL}}"
+    commands:
+      - python /app/memory/store_results.py --task {{outputs.select_task.outputFiles['selected_task.json']}} --pr {{outputs.create_pull_request.outputFiles['pr_data.json']}} --review {{outputs.fetch_code_review.outputFiles['code_review.json']}} --evaluation {{outputs.evaluate_pr.outputFiles['evaluation.json']}}
+    outputFiles:
+      - "stored_run_id.txt"
+
+  # ===========================================
+  # PHASE 9: LEARNING & REFLECTION
+  # ===========================================
+  
+  - id: generate_learnings
+    type: io.kestra.plugin.scripts.python.Commands
+    description: Extract learnings from this PR
+    runner: DOCKER
+    docker:
+      image: python:3.11-slim
+    beforeCommands:
+      - pip install anthropic openai psycopg2-binary
+    env:
+      ANTHROPIC_API_KEY: "{{env.ANTHROPIC_API_KEY}}"
+      DATABASE_URL: "{{env.DATABASE_URL}}"
+    commands:
+      - python /app/agent/reflect.py --run-id {{outputs.store_results.outputFiles['stored_run_id.txt']}} --review {{outputs.fetch_code_review.outputFiles['code_review.json']}} --evaluation {{outputs.evaluate_pr.outputFiles['evaluation.json']}}
+
+  # ===========================================
+  # PHASE 10: CLEANUP
+  # ===========================================
+  
+  - id: cleanup
+    type: io.kestra.plugin.scripts.shell.Commands
+    description: Clean up workspace
+    commands:
+      - rm -rf {{render(vars.work_dir)}}
+      - echo "Cleanup complete"
+
+errors:
+  - id: error_handler
+    type: io.kestra.plugin.scripts.python.Commands
+    description: Handle workflow errors
+    runner: DOCKER
+    docker:
+      image: python:3.11-slim
+    beforeCommands:
+      - pip install psycopg2-binary
+    env:
+      DATABASE_URL: "{{env.DATABASE_URL}}"
+    commands:
+      - python /app/memory/log_error.py --error "{{errors}}"

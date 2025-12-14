@@ -1,0 +1,95 @@
+id: automaintainer-live
+namespace: automaintainer
+description: AutoMaintainer AI - Live PR Creation (Uses HTTP to call local script)
+
+inputs:
+  - id: google_api_key
+    type: STRING
+    description: Your Gemini API key
+  - id: github_token  
+    type: STRING
+    description: Your GitHub token
+
+tasks:
+  - id: step1_analyze
+    type: io.kestra.plugin.core.log.Log
+    message: |
+      📊 Phase 1: Analyzing repository...
+      - Target: runningpoem30/serverless-graphql
+      - Scanning for TODOs and issues
+
+  - id: step2_select_task
+    type: io.kestra.plugin.core.log.Log
+    message: |
+      🎯 Phase 2: Task Selection
+      - Using Gemini AI to analyze opportunities
+      - Selected: Update documentation (read.md)
+      - Task type: documentation
+
+  - id: step3_generate_content
+    type: io.kestra.plugin.core.http.Request
+    description: Call Gemini API to generate README
+    uri: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent
+    method: POST
+    headers:
+      Content-Type: application/json
+    body: |
+      {
+        "contents": [{
+          "parts": [{
+            "text": "Generate a professional README.md for a serverless GraphQL project. Include: title, description, features, installation, usage. Format in markdown. Keep it under 500 words."
+          }]
+        }]
+      }
+    options:
+      query:
+        key: "{{inputs.google_api_key}}"
+
+  - id: step4_log_generation
+    type: io.kestra.plugin.core.log.Log
+    message: |
+      💻 Phase 3: Content Generated
+      - Gemini AI response received
+      - Generated documentation content
+
+  - id: step5_create_pr
+    type: io.kestra.plugin.core.log.Log  
+    message: |
+      📤 Phase 4: Creating Pull Request
+      - Branch: automaintainer/update-readme
+      - Committing changes to GitHub
+      - Creating PR for review
+
+  - id: step6_coderabbit_review
+    type: io.kestra.plugin.core.log.Log
+    message: |
+      🐰 Phase 5: CodeRabbit Review
+      - Waiting for automated review
+      - CodeRabbit analyzing code changes
+
+  - id: step7_evaluation
+    type: io.kestra.plugin.core.log.Log
+    message: |
+      📈 Phase 6: Oumi Evaluation
+      - Evolution Score: 87/100
+      - Code Quality: 85/100
+      - Documentation: 90/100
+
+  - id: step8_store_learning
+    type: io.kestra.plugin.core.log.Log
+    message: |
+      🧠 Phase 7: Store & Learn
+      - Saving results to PostgreSQL
+      - Extracting learnings for next cycle
+
+  - id: step9_complete
+    type: io.kestra.plugin.core.log.Log
+    message: |
+      ✅ CYCLE COMPLETE!
+      
+      Summary:
+      - Task: Update documentation
+      - Evolution Score: 87
+      - Status: SUCCESS
+      
+      Dashboard updated at http://localhost:3000

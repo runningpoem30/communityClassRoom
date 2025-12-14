@@ -1,0 +1,92 @@
+id: automaintainer-real
+namespace: automaintainer
+description: AutoMaintainer AI - Real PR Creation
+
+inputs:
+  - id: google_api_key
+    type: STRING
+    description: Your Gemini API key
+  - id: github_token
+    type: STRING
+    description: Your GitHub Personal Access Token
+
+tasks:
+  - id: start
+    type: io.kestra.plugin.core.log.Log
+    message: "🚀 Starting AutoMaintainer AI"
+
+  - id: generate_readme_content
+    type: io.kestra.plugin.scripts.python.Script
+    description: Use Gemini to generate improved README content
+    runner: PROCESS
+    beforeCommands:
+      - pip install google-generativeai --quiet
+    env:
+      GOOGLE_API_KEY: "{{inputs.google_api_key}}"
+    script: |
+      import google.generativeai as genai
+      import os
+      
+      genai.configure(api_key=os.environ['GOOGLE_API_KEY'])
+      model = genai.GenerativeModel('gemini-2.0-flash-exp')
+      
+      prompt = "Generate an improved README.md for a serverless GraphQL project. Include: title, description, features, installation, usage examples. Format in Markdown."
+      
+      response = model.generate_content(prompt)
+      readme_content = response.text
+      
+      with open('generated_readme.md', 'w') as f:
+          f.write(readme_content)
+      
+      print("Generated README content with Gemini AI")
+    outputFiles:
+      - generated_readme.md
+
+  - id: create_github_pr
+    type: io.kestra.plugin.scripts.python.Script
+    description: Create PR on GitHub
+    runner: PROCESS
+    beforeCommands:
+      - pip install PyGithub --quiet
+    env:
+      GITHUB_TOKEN: "{{inputs.github_token}}"
+    inputFiles:
+      readme_content: "{{outputs.generate_readme_content.outputFiles['generated_readme.md']}}"
+    script: |
+      from github import Github
+      import os
+      import datetime
+      import json
+      
+      with open('readme_content', 'r') as f:
+          new_content = f.read()
+      
+      g = Github(os.environ['GITHUB_TOKEN'])
+      repo = g.get_repo("runningpoem30/serverless-graphql")
+      
+      branch_name = f"automaintainer/update-readme-{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}"
+      
+      default_branch = repo.default_branch
+      source = repo.get_branch(default_branch)
+      repo.create_git_ref(ref=f"refs/heads/{branch_name}", sha=source.commit.sha)
+      
+      try:
+          file = repo.get_contents("read.md", ref=branch_name)
+          repo.update_file("read.md", "Improved docs by AutoMaintainer AI", new_content, file.sha, branch=branch_name)
+      except:
+          repo.create_file("README.md", "Added docs by AutoMaintainer AI", new_content, branch=branch_name)
+      
+      pr = repo.create_pull(
+          title="Improve documentation - AutoMaintainer AI",
+          body="Automated PR by AutoMaintainer AI using Gemini to improve documentation.",
+          head=branch_name,
+          base=default_branch
+      )
+      
+      print(f"Created PR #{pr.number}: {pr.html_url}")
+    outputFiles:
+      - pr_info.json
+
+  - id: complete
+    type: io.kestra.plugin.core.log.Log
+    message: "AutoMaintainer AI completed - Check your GitHub repo for the PR!"
